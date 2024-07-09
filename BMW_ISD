@@ -1,0 +1,106 @@
+USE [SGEAS_DIFF]
+GO
+
+/****** Object:  StoredProcedure [dbo].[bmw_isd]    Script Date: 7/5/2024 4:26:08 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+CREATE procedure [dbo].[bmw_isd] 
+as
+begin
+
+
+
+set nocount on
+declare
+@VIN nvarchar(17),@Inservice_Date nvarchar(10),
+@MFG_Warranty_Exp_Date  nvarchar(10),@MFG_Warranty_Exp_Miles nvarchar(10),@id int,
+@dup_count int,@created_date datetime, @Make nvarchar(50), @Model nvarchar(100), @Trim nvarchar(150),
+@Model_Description nvarchar(200),@Model_Year nvarchar(4),@Dealer nvarchar(20),@Odometer nvarchar(10),@Vehicle_Condition_at_Purchase nvarchar(1),
+@Interior_Color [nvarchar](80),@Exterior_Color [nvarchar](80),@Vehicle_Purchase_Date [nvarchar](10),@Dealer_Name [nvarchar](80),@Created_by [nvarchar](50),
+@Updated_Date datetime,@Updated_by [nvarchar](50)
+
+
+	
+
+declare c1 cursor for 
+select distinct a.vin,a.Inservice_Date,a.MFG_Warranty_Exp_Date,a.MFG_Warranty_Exp_Miles,a.Vehicle_Condition_at_Purchase,min(a.id) id,count(*) as dup_count
+from stg_BMW_Vehicle_Retail_Sales a left outer join BMW_Vehicle_Retail_Sales b on a.vin = b.vin 
+and convert(date,coalesce(a.Inservice_Date,'1799-12-31')) = convert(date,coalesce(b.Inservice_Date,'1799-12-31'))
+and convert(date,coalesce(a.MFG_Warranty_Exp_Date,'1799-12-31'))  = convert(date,coalesce(b.MFG_Warranty_Exp_Date,'1799-12-31'))
+and coalesce(a.MFG_Warranty_Exp_Miles,'*') = coalesce(b.MFG_Warranty_Exp_Miles,'*')
+and coalesce(a.Vehicle_Condition_at_Purchase,'*') =  coalesce(b.Vehicle_Condition_at_Purchase,'*') 
+where   (b.vin is null and b.Inservice_Date  is null and b.MFG_Warranty_Exp_Date is null 
+and b.MFG_Warranty_Exp_Miles  is null and b.Vehicle_Condition_at_Purchase is null)
+group by a.vin,a.Inservice_Date,a.MFG_Warranty_Exp_Date,a.MFG_Warranty_Exp_Miles,a.Vehicle_Condition_at_Purchase
+order by id
+
+open c1
+
+fetch c1 into @VIN, @Inservice_Date, @MFG_Warranty_Exp_Date , @MFG_Warranty_Exp_Miles, @Vehicle_Condition_at_Purchase,@id , @dup_count 
+
+while (@@fetch_status = 0)
+begin
+	select @VIN = VIN, @Inservice_Date = Inservice_Date, @MFG_Warranty_Exp_Date = MFG_Warranty_Exp_Date, @MFG_Warranty_Exp_Miles = MFG_Warranty_Exp_Miles,
+	 @Make= Make, @Model = Model, @Trim = Trim,@Model_Description = Model_Description,@Model_Year = Model_Year,@Dealer = Dealer,@Odometer = Odometer,
+	 @Vehicle_Condition_at_Purchase = Vehicle_Condition_at_Purchase,@created_date= created_date,@Interior_Color = Interior_Color,
+	 @Exterior_Color = Exterior_Color, @Vehicle_Purchase_Date = Vehicle_Purchase_Date,@Dealer_Name = Dealer_Name, @Created_by = Created_by,
+	 @Updated_Date = Updated_Date, @Updated_by = Updated_by
+	  from stg_BMW_Vehicle_Retail_Sales where id = @id 
+
+	
+	insert into dbo.BMW_Vehicle_Retail_Sales (vin, Inservice_Date, MFG_Warranty_Exp_Date, MFG_Warranty_Exp_Miles, id, sequence,make,model,
+	trim,Model_Description,Model_Year,Dealer,Odometer,Vehicle_Condition_at_Purchase,created_date,Interior_Color,Exterior_Color,Vehicle_Purchase_Date,
+	Dealer_Name,Created_by,Updated_Date,Updated_by)values
+	(@VIN,@Inservice_Date,@MFG_Warranty_Exp_Date,@MFG_Warranty_Exp_Miles,@id ,
+	(select coalesce(max(sequence),'0')+1 from BMW_Vehicle_Retail_Sales where vin=@VIN),@make,@model,@trim,@Model_Description,@Model_Year,@Dealer,
+	@Odometer,@Vehicle_Condition_at_Purchase,@created_date,@Interior_Color,@Exterior_Color,@Vehicle_Purchase_Date,@Dealer_Name,@Created_by,@Updated_Date,@Updated_by)
+	
+	
+	update bmw_vehicle_sales_retail_delivery_reporting
+	set status_eas = 'ACCEPTED'
+	where id = @id
+	
+	
+	if (@dup_count > 1)
+	begin
+	
+	
+	 declare c2 cursor for
+	 select id from stg_BMW_Vehicle_Retail_Sales
+	 where id > @id
+	 order by id 
+		
+	 open c2
+	 fetch c2 into @id
+	
+	 while (@@fetch_status = 0)
+	 begin 
+		
+	update bmw_vehicle_sales_retail_delivery_reporting
+	set status_eas = 'REJECTED'
+	where id = @id
+	
+	fetch c2 into @id	
+	 end
+	 close c2
+	 deallocate c2
+
+	
+   end		
+   
+   fetch c1 into @VIN, @Inservice_Date, @MFG_Warranty_Exp_Date , @MFG_Warranty_Exp_Miles, @Vehicle_Condition_at_Purchase,@id , @dup_count 
+
+end
+close c1
+deallocate c1
+
+end;
+
+GO
+
+
